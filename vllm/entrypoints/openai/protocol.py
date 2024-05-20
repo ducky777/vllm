@@ -1,7 +1,7 @@
 # Adapted from
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/protocol/openai_api_protocol.py
 import time
-from typing import Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union, Tuple
 
 import torch
 from pydantic import BaseModel, Field, conint, model_validator
@@ -99,20 +99,23 @@ class ChatCompletionRequest(BaseModel):
         default=False,
         description=(
             "If true, the new message will be prepended with the last message "
-            "if they belong to the same role."),
+            "if they belong to the same role."
+        ),
     )
     add_generation_prompt: Optional[bool] = Field(
         default=True,
-        description=
-        ("If true, the generation prompt will be added to the chat template. "
-         "This is a parameter used by chat template in tokenizer config of the "
-         "model."),
+        description=(
+            "If true, the generation prompt will be added to the chat template. "
+            "This is a parameter used by chat template in tokenizer config of the "
+            "model."
+        ),
     )
     include_stop_str_in_output: Optional[bool] = Field(
         default=False,
         description=(
             "Whether to include the stop string in the output. "
-            "This is only applied when the stop or stop_token_ids is set."),
+            "This is only applied when the stop or stop_token_ids is set."
+        ),
     )
     guided_json: Optional[Union[str, dict, BaseModel]] = Field(
         default=None,
@@ -120,18 +123,15 @@ class ChatCompletionRequest(BaseModel):
     )
     guided_regex: Optional[str] = Field(
         default=None,
-        description=(
-            "If specified, the output will follow the regex pattern."),
+        description=("If specified, the output will follow the regex pattern."),
     )
     guided_choice: Optional[List[str]] = Field(
         default=None,
-        description=(
-            "If specified, the output will be exactly one of the choices."),
+        description=("If specified, the output will be exactly one of the choices."),
     )
     guided_grammar: Optional[str] = Field(
         default=None,
-        description=(
-            "If specified, the output will follow the context free grammar."),
+        description=("If specified, the output will follow the context free grammar."),
     )
 
     # doc: end-chat-completion-extra-params
@@ -144,8 +144,8 @@ class ChatCompletionRequest(BaseModel):
         if self.logit_bias:
 
             def logit_bias_logits_processor(
-                    token_ids: List[int],
-                    logits: torch.Tensor) -> torch.Tensor:
+                token_ids: List[int], logits: torch.Tensor
+            ) -> torch.Tensor:
                 for token_id, bias in self.logit_bias.items():
                     # Clamp the bias between -100 and 100 per OpenAI API spec
                     bias = min(100, max(-100, bias))
@@ -184,15 +184,18 @@ class ChatCompletionRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_guided_decoding_count(cls, data):
-        guide_count = sum([
-            "guided_json" in data and data["guided_json"] is not None,
-            "guided_regex" in data and data["guided_regex"] is not None,
-            "guided_choice" in data and data["guided_choice"] is not None
-        ])
+        guide_count = sum(
+            [
+                "guided_json" in data and data["guided_json"] is not None,
+                "guided_regex" in data and data["guided_regex"] is not None,
+                "guided_choice" in data and data["guided_choice"] is not None,
+            ]
+        )
         if guide_count > 1:
             raise ValueError(
                 "You can only use one kind of guided decoding "
-                "('guided_json', 'guided_regex' or 'guided_choice').")
+                "('guided_json', 'guided_regex' or 'guided_choice')."
+            )
         return data
 
 
@@ -237,14 +240,16 @@ class CompletionRequest(BaseModel):
         default=False,
         description=(
             "Whether to include the stop string in the output. "
-            "This is only applied when the stop or stop_token_ids is set."),
+            "This is only applied when the stop or stop_token_ids is set."
+        ),
     )
     response_format: Optional[ResponseFormat] = Field(
         default=None,
-        description=
-        ("Similar to chat completion, this parameter specifies the format of "
-         "output. Only {'type': 'json_object'} or {'type': 'text' } is "
-         "supported."),
+        description=(
+            "Similar to chat completion, this parameter specifies the format of "
+            "output. Only {'type': 'json_object'} or {'type': 'text' } is "
+            "supported."
+        ),
     )
     guided_json: Optional[Union[str, dict, BaseModel]] = Field(
         default=None,
@@ -252,18 +257,21 @@ class CompletionRequest(BaseModel):
     )
     guided_regex: Optional[str] = Field(
         default=None,
-        description=(
-            "If specified, the output will follow the regex pattern."),
+        description=("If specified, the output will follow the regex pattern."),
     )
     guided_choice: Optional[List[str]] = Field(
         default=None,
-        description=(
-            "If specified, the output will be exactly one of the choices."),
+        description=("If specified, the output will be exactly one of the choices."),
     )
     guided_grammar: Optional[str] = Field(
         default=None,
-        description=(
-            "If specified, the output will follow the context free grammar."),
+        description=("If specified, the output will follow the context free grammar."),
+    )
+    
+    control_vectors: Optional[List[dict]] = Field(
+        default=None,
+        description="A list of dict with keys `name` and `strength`. "
+        "The specified control vectors will be applied with the defined strengths.",
     )
 
     # doc: end-completion-extra-params
@@ -275,8 +283,8 @@ class CompletionRequest(BaseModel):
         if self.logit_bias:
 
             def logit_bias_logits_processor(
-                    token_ids: List[int],
-                    logits: torch.Tensor) -> torch.Tensor:
+                token_ids: List[int], logits: torch.Tensor
+            ) -> torch.Tensor:
                 for token_id, bias in self.logit_bias.items():
                     # Clamp the bias between -100 and 100 per OpenAI API spec
                     bias = min(100, max(-100, bias))
@@ -316,15 +324,18 @@ class CompletionRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_guided_decoding_count(cls, data):
-        guide_count = sum([
-            "guided_json" in data and data["guided_json"] is not None,
-            "guided_regex" in data and data["guided_regex"] is not None,
-            "guided_choice" in data and data["guided_choice"] is not None
-        ])
+        guide_count = sum(
+            [
+                "guided_json" in data and data["guided_json"] is not None,
+                "guided_regex" in data and data["guided_regex"] is not None,
+                "guided_choice" in data and data["guided_choice"] is not None,
+            ]
+        )
         if guide_count > 1:
             raise ValueError(
                 "You can only use one kind of guided decoding "
-                "('guided_json', 'guided_regex' or 'guided_choice').")
+                "('guided_json', 'guided_regex' or 'guided_choice')."
+            )
         return data
 
 
@@ -345,7 +356,8 @@ class CompletionResponseChoice(BaseModel):
         description=(
             "The stop string or token id that caused the completion "
             "to stop, None if the completion finished for some other reason "
-            "including encountering the EOS token"),
+            "including encountering the EOS token"
+        ),
     )
 
 
@@ -368,7 +380,8 @@ class CompletionResponseStreamChoice(BaseModel):
         description=(
             "The stop string or token id that caused the completion "
             "to stop, None if the completion finished for some other reason "
-            "including encountering the EOS token"),
+            "including encountering the EOS token"
+        ),
     )
 
 

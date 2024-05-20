@@ -153,7 +153,8 @@ class OpenAIServingCompletion(OpenAIServing):
                                          sampling_params,
                                          f"{request_id}-{i}",
                                          prompt_token_ids=input_ids,
-                                         lora_request=lora_request))
+                                         lora_request=lora_request,
+                                         control_vector_data=request.control_vectors))
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
             return self.create_error_response(str(e))
