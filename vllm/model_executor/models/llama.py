@@ -319,7 +319,7 @@ class LlamaModel(nn.Module):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         inputs_embeds: Optional[torch.Tensor] = None,
-        control_vectors: Optional[ControlVectorData] = None,
+        control_vectors: Optional[List[ControlVectorData]] = None,
         **kwargs,
     ) -> torch.Tensor:
 
@@ -342,19 +342,20 @@ class LlamaModel(nn.Module):
             )
 
             if control_vectors is not None:
-                if control_vectors.save_hidden_states:
-                    hidden_layers.append(hidden_states.clone())
-                if control_vectors.layers is not None:
-                    if i in control_vectors.layers:
-                        hidden_states += (
-                            self.cvec[control_vectors.name][i] * control_vectors.strength
-                        )
+                # if control_vectors.save_hidden_states:
+                #     hidden_layers.append(hidden_states.clone())
+                for cv in control_vectors:
+                    if cv.layers is not None:
+                        if i in cv.layers:
+                            hidden_states += (
+                                self.cvec[cv.name][i] * cv.strength
+                            )
 
         hidden_states, _ = self.norm(hidden_states, residual)
 
-        if control_vectors is not None:
-            if control_vectors.save_hidden_states:
-                return hidden_states, hidden_layers
+        # if control_vectors is not None:
+        #     if control_vectors.save_hidden_states:
+        #         return hidden_states, hidden_layers
 
         return hidden_states
 
