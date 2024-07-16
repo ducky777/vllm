@@ -24,17 +24,20 @@
 import json
 import os
 from queue import Queue
-from threading import Thread, Event
+from threading import Event, Thread
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+import yaml
 from torch import nn
 from transformers import LlamaConfig
 
 from vllm.attention import Attention, AttentionMetadata
 from vllm.config import LoRAConfig
+from vllm.control_vectors.data import ControlVector, ControlVectorData
 from vllm.model_executor.layers.activation import SiluAndMul
+from vllm.model_executor.layers.interventions import INTERVENTION_DIR, InterventionLayer
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
     LinearMethodBase,
@@ -63,9 +66,8 @@ from vllm.model_executor.weight_utils import (
 from vllm.sequence import SamplerOutput
 from vllm.utils import is_hip
 
-from vllm.control_vectors.data import ControlVectorData, ControlVector
-
 ROOT_DIR = os.path.join(os.path.abspath(__file__), "..", "..", "..", "..")
+
 
 class LlamaMLP(nn.Module):
 
@@ -291,23 +293,63 @@ class LlamaModel(nn.Module):
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-        cvec_layers = list(range(15, 27))
-        self.cvec: dict[ControlVector] = {}
+        # cvec_layers = list(range(15, 27))
+        # self.cvec: dict[ControlVector] = {}
 
-        cvec_dir = os.path.abspath(f"{ROOT_DIR}/data/control_vectors")
-        cvec_files = os.listdir(cvec_dir)
+        # cvec_dir = os.path.abspath(f"{ROOT_DIR}/data/control_vectors")
+        # cvec_files = os.listdir(cvec_dir)
 
-        for fn in cvec_files:
-            cvec_path = f"{cvec_dir}/{fn}"
-            with open(cvec_path, "r") as f:
-                cvec = ControlVector(**json.load(f))
+        # for fn in cvec_files:
+        #     cvec_path = f"{cvec_dir}/{fn}"
+        #     with open(cvec_path, "r") as f:
+        #         cvec = ControlVector(**json.load(f))
 
-                self.cvec[cvec.name] = {
-                    int(k): torch.tensor(v, dtype=torch.bfloat16, device="cuda:0")
-                    for k, v in cvec.directions.items()
-                    if int(k) in cvec_layers
+        #         self.cvec[cvec.name] = {
+        #             int(k): torch.tensor(v, dtype=torch.bfloat16, device="cuda:0")
+        #             for k, v in cvec.directions.items()
+        #             if int(k) in cvec_layers
+        #         }
+        #     print(f"Initialised control vector: [{cvec.name}] from [{cvec_path}]")
+
+        self.interventions = {}
+
+        for sub_folder in os.listdir(INTERVENTION_DIR):
+            sub_folder_dir = os.path.join(INTERVENTION_DIR, sub_folder)
+            for intervention_file in os.listdir(sub_folder_dir):
+                if not intervention_file.endswith(".bin"):
+                    continue
+                data = torch.load(os.path.join(sub_folder_dir, intervention_file))
+                intervention_settings = intervention_file.split(".")
+                layer_num = int(intervention_settings[1])
+
+                with open(os.path.join(sub_folder_dir, "cfg.yml"), "r") as f:
+                    cfg = yaml.safe_load(f)
+
+                self.interventions[layer_num] = {
+                    "name": cfg["name"],
+                    "intervention": InterventionLayer.load_layer(cfg, data),
                 }
-            print(f"Initialised control vector: [{cvec.name}] from [{cvec_path}]")
+
+                print(
+                    f"""Loaded {cfg["name"]} intervention from {sub_folder_dir} at layer {layer_num}"""
+                )
+
+        # for intervention_data in [
+        #     "/home/ubuntu/cvec-vllm/vllm/data/LoreftIntervention_insurance_ooc_cuda2/intkey_layer.10.comp.block_output.unit.pos.nunit.1#0.bin"
+        # ]:
+        #     data = torch.load(intervention_data)
+        #     # self.interventions[29] = ConsreftIntervention(
+        #     #     data["rotate_layer.parametrizations.weight.original"],
+        #     #     data["learned_source"],
+        #     # )
+
+        #     self.interventions[10] = {
+        #         "intervention": LoreftIntervention(
+        #             data["weight"],
+        #             data["bias"],
+        #             data["rotate_layer"],
+        #         ),
+        #     }
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -333,6 +375,7 @@ class LlamaModel(nn.Module):
 
         for i in range(len(self.layers)):
             layer = self.layers[i]
+
             hidden_states, residual = layer(
                 positions,
                 hidden_states,
@@ -342,14 +385,65 @@ class LlamaModel(nn.Module):
             )
 
             if control_vectors is not None:
-                # if control_vectors.save_hidden_states:
-                #     hidden_layers.append(hidden_states.clone())
-                for cv in control_vectors:
-                    if cv.layers is not None:
-                        if i in cv.layers:
-                            hidden_states += (
-                                self.cvec[cv.name][i] * cv.strength
+
+                if i in self.interventions:
+
+                    for cvec in control_vectors:
+                        if isinstance(cvec, dict):
+                            cvec = ControlVectorData(**cvec)
+
+                        if (
+                            cvec.name != self.interventions[i]["name"]
+                            or not cvec.intervene
+                        ):
+                            continue
+
+                        scale = cvec.intervention_scale
+                        intervention_type = cvec.intervention_type.lower()
+
+                        if intervention_type == "pos":
+                            unit = len(input_ids) - 1
+
+                            selected_output = torch.unsqueeze(hidden_states[unit], 0)
+                            intervention_output = self.interventions[i]["intervention"](
+                                selected_output
                             )
+                            scaled_intervention = (
+                                intervention_output - selected_output
+                            ) * scale + selected_output
+                            hidden_states[unit] = scaled_intervention
+
+                        elif intervention_type == "full":
+                            intervention_output = self.interventions[i]["intervention"](
+                                hidden_states
+                            )
+                            scaled_intervention = (
+                                intervention_output - hidden_states
+                            ) * scale + hidden_states
+                            hidden_states = scaled_intervention
+                        else:
+                            print(f"Invalid intervention type: {intervention_type}")
+
+                        print("applied intervention")
+
+                    # print(hidden_states[unit])
+                    # hidden_states = self.interventions[i]["intervention"](
+                    #     hidden_states
+                    # )
+
+                    # scaled intervention full
+
+                    # hidden_states = self.interventions[i](hidden_states)
+
+            # if control_vectors is not None:
+            # if control_vectors.save_hidden_states:
+            #     hidden_layers.append(hidden_states.clone())
+            # for cv in control_vectors:
+            #     if cv.layers is not None:
+            #         if i in cv.layers:
+            #             hidden_states += (
+            #                 self.cvec[cv.name][i] * cv.strength
+            #             )
 
         hidden_states, _ = self.norm(hidden_states, residual)
 
@@ -430,7 +524,12 @@ class LlamaForCausalLM(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         hidden_states = self.model(
-            input_ids, positions, kv_caches, attn_metadata, control_vectors=control_vectors, **kwargs
+            input_ids,
+            positions,
+            kv_caches,
+            attn_metadata,
+            control_vectors=control_vectors,
+            **kwargs,
         )
         return hidden_states
 
