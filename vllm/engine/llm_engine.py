@@ -282,6 +282,7 @@ class LLMEngine:
         lora_request: Optional[LoRARequest] = None,
         multi_modal_data: Optional[MultiModalData] = None,
         control_vectors: Optional[ControlVectorData] = None,
+        **kwargs
     ) -> None:
         """Add a request to the engine's request pool.
 
@@ -355,6 +356,7 @@ class LLMEngine:
             eos_token_id,
             lora_request,
             control_vectors=control_vectors,
+            **kwargs
         )
 
         # Defensive copy of SamplingParams, which are used by the sampler,
@@ -373,6 +375,7 @@ class LLMEngine:
             lora_request,
             multi_modal_data,
             control_vectors,
+            **kwargs
         )
 
         # Add the sequence group to the scheduler.

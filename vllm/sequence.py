@@ -217,7 +217,8 @@ class Sequence:
         block_size: int,
         eos_token_id: Optional[int] = None,
         lora_request: Optional[LoRARequest] = None,
-        control_vectors: Optional[ControlVectorData] = None
+        control_vectors: Optional[ControlVectorData] = None,
+        **kwargs
     ) -> None:
         self.seq_id = seq_id
         self.prompt = prompt
@@ -242,6 +243,8 @@ class Sequence:
         self.tokens: Optional[List[str]] = None
         
         self.control_vectors = control_vectors
+        
+        self.kwargs = kwargs
 
     @property
     def lora_int_id(self) -> int:
@@ -431,7 +434,8 @@ class SequenceGroup:
         arrival_time: float,
         lora_request: Optional[LoRARequest] = None,
         multi_modal_data: Optional[MultiModalData] = None,
-        control_vectors: Optional[ControlVectorData] = None
+        control_vectors: Optional[ControlVectorData] = None,
+        **kwargs
     ) -> None:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
@@ -448,6 +452,7 @@ class SequenceGroup:
         self.state = SequenceGroupState()
         self.multi_modal_data = multi_modal_data
         self.control_vectors = control_vectors
+        self.kwargs = kwargs
 
     @property
     def prompt(self) -> str:
@@ -600,7 +605,8 @@ class SequenceGroupMetadata:
         computed_block_nums: Optional[List[int]] = None,
         state: Optional[SequenceGroupState] = None,
         multi_modal_data: Optional[MultiModalData] = None,
-        control_vectors: Optional[ControlVectorData] = None
+        control_vectors: Optional[ControlVectorData] = None,
+        **kwargs
         
     ) -> None:
         self.request_id = request_id
@@ -614,6 +620,7 @@ class SequenceGroupMetadata:
         self.state = SequenceGroupState() if state is None else state
         self._token_chunk_size = token_chunk_size
         self.control_vectors = control_vectors
+        self.kwargs = kwargs
 
         if self._token_chunk_size is None:
             if is_prompt:

@@ -100,9 +100,6 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
 
 @app.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
-    if request.control_vectors:
-        os.environ["__vllm_cvec"] = request.control_vectors
-
     generator = await openai_serving_completion.create_completion(request, raw_request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(), status_code=generator.code)

@@ -35,9 +35,13 @@ from transformers import LlamaConfig
 
 from vllm.attention import Attention, AttentionMetadata
 from vllm.config import LoRAConfig
-from vllm.control_vectors.data import ControlVector, ControlVectorData
+from vllm.control_vectors.data import ControlVectorData
 from vllm.model_executor.layers.activation import SiluAndMul
-from vllm.model_executor.layers.interventions import INTERVENTION_DIR, InterventionLayer
+from vllm.model_executor.layers.interventions import (
+    INTERVENTION_DIR,
+    InterventionLayer,
+    InterventionData,
+)
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
     LinearMethodBase,
@@ -264,6 +268,8 @@ class LlamaDecoderLayer(nn.Module):
 
 class LlamaModel(nn.Module):
 
+    interventions: InterventionData
+
     def __init__(
         self,
         config: LlamaConfig,
@@ -293,25 +299,7 @@ class LlamaModel(nn.Module):
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-        # cvec_layers = list(range(15, 27))
-        # self.cvec: dict[ControlVector] = {}
-
-        # cvec_dir = os.path.abspath(f"{ROOT_DIR}/data/control_vectors")
-        # cvec_files = os.listdir(cvec_dir)
-
-        # for fn in cvec_files:
-        #     cvec_path = f"{cvec_dir}/{fn}"
-        #     with open(cvec_path, "r") as f:
-        #         cvec = ControlVector(**json.load(f))
-
-        #         self.cvec[cvec.name] = {
-        #             int(k): torch.tensor(v, dtype=torch.bfloat16, device="cuda:0")
-        #             for k, v in cvec.directions.items()
-        #             if int(k) in cvec_layers
-        #         }
-        #     print(f"Initialised control vector: [{cvec.name}] from [{cvec_path}]")
-
-        self.interventions = {}
+        self.interventions = InterventionData()
 
         for sub_folder in os.listdir(INTERVENTION_DIR):
             sub_folder_dir = os.path.join(INTERVENTION_DIR, sub_folder)
@@ -325,14 +313,23 @@ class LlamaModel(nn.Module):
                 with open(os.path.join(sub_folder_dir, "cfg.yml"), "r") as f:
                     cfg = yaml.safe_load(f)
 
-                self.interventions[layer_num] = {
-                    "name": cfg["name"],
-                    "intervention": InterventionLayer.load_layer(cfg, data),
-                }
-
-                print(
-                    f"""Loaded {cfg["name"]} intervention from {sub_folder_dir} at layer {layer_num}"""
+                self.interventions.append(
+                    layer_num, cfg["name"], InterventionLayer(cfg, data)
                 )
+
+                # if layer_num not in self.interventions:
+                #     self.interventions[layer_num] = {"interventions": []}
+
+                # self.interventions[layer_num]["interventions"].append(
+                #     {
+                #         "name": cfg["name"],
+                #         "intervention": InterventionLayer(cfg, data),
+                #     }
+                # )
+
+                # print(
+                #     f"""Loaded {cfg["name"]} intervention from {sub_folder_dir} at layer {layer_num}"""
+                # )
 
         # for intervention_data in [
         #     "/home/ubuntu/cvec-vllm/vllm/data/LoreftIntervention_insurance_ooc_cuda2/intkey_layer.10.comp.block_output.unit.pos.nunit.1#0.bin"
@@ -386,45 +383,42 @@ class LlamaModel(nn.Module):
 
             if control_vectors is not None:
 
-                if i in self.interventions:
+                if i not in self.interventions.intervenable_layers:
+                    continue
 
-                    for cvec in control_vectors:
-                        if isinstance(cvec, dict):
-                            cvec = ControlVectorData(**cvec)
+                for cvec in control_vectors:
+                    if isinstance(cvec, dict):
+                        cvec = ControlVectorData(**cvec)
 
-                        if (
-                            cvec.name != self.interventions[i]["name"]
-                            or not cvec.intervene
-                        ):
-                            continue
+                    if not cvec.intervene:
+                        continue
+                    
+                    intervene_idx = (i, cvec.name)
+                    if intervene_idx not in self.interventions.intervenable_tuples:
+                        continue
+                    
+                    scale = cvec.intervention_scale
+                    intervention_type = cvec.intervention_type.lower()
+                    
+                    if intervention_type == "pos":
+                        unit = len(input_ids) - 1
 
-                        scale = cvec.intervention_scale
-                        intervention_type = cvec.intervention_type.lower()
+                        selected_output = torch.unsqueeze(hidden_states[unit], 0)
+                        intervention_output = self.interventions[intervene_idx](
+                            selected_output, scale
+                        )
 
-                        if intervention_type == "pos":
-                            unit = len(input_ids) - 1
+                        hidden_states[unit] = intervention_output
 
-                            selected_output = torch.unsqueeze(hidden_states[unit], 0)
-                            intervention_output = self.interventions[i]["intervention"](
-                                selected_output
-                            )
-                            scaled_intervention = (
-                                intervention_output - selected_output
-                            ) * scale + selected_output
-                            hidden_states[unit] = scaled_intervention
+                    elif intervention_type == "full":
+                        hidden_states = self.interventions[intervene_idx](
+                            hidden_states, scale
+                        )
 
-                        elif intervention_type == "full":
-                            intervention_output = self.interventions[i]["intervention"](
-                                hidden_states
-                            )
-                            scaled_intervention = (
-                                intervention_output - hidden_states
-                            ) * scale + hidden_states
-                            hidden_states = scaled_intervention
-                        else:
-                            print(f"Invalid intervention type: {intervention_type}")
+                    else:
+                        print(f"Invalid intervention type: {intervention_type}")
 
-                        print("applied intervention")
+                    print(f"Applied {cvec.name} intervention")
 
                     # print(hidden_states[unit])
                     # hidden_states = self.interventions[i]["intervention"](

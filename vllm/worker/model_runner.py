@@ -813,32 +813,33 @@ class ModelRunner:
             "control_vectors": seq_group_metadata_list[
                 0
             ].control_vectors,  # assumes all use the same
+            **seq_group_metadata_list[0].kwargs
         }
         if self.vision_language_config:
             execute_model_kwargs.update({"image_input": multi_modal_input})
-        if (
-            isinstance(model_executable, CUDAGraphRunner)
-            or seq_group_metadata_list[0].control_vectors is None
-            or not seq_group_metadata_list[0].control_vectors.save_hidden_states
-        ):
-            hidden_states = model_executable(**execute_model_kwargs)
-        else:
-            hidden_states, hidden_layers = model_executable(**execute_model_kwargs)
+        # if (
+        #     isinstance(model_executable, CUDAGraphRunner)
+        #     or seq_group_metadata_list[0].control_vectors is None
+        #     or not seq_group_metadata_list[0].control_vectors[0].save_hidden_states
+        # ):
+        #     hidden_states = model_executable(**execute_model_kwargs)
+        # else:
+        #     hidden_states, hidden_layers = model_executable(**execute_model_kwargs)
 
-            self._save_thread = Thread(
-                target=self._save_hidden_states, name="Hidden states saver"
-            )
-            self._save_thread.start()
+        #     self._save_thread = Thread(
+        #         target=self._save_hidden_states, name="Hidden states saver"
+        #     )
+        #     self._save_thread.start()
 
-            for i, layer in enumerate(hidden_layers):
-                is_last = False
-                if i == len(hidden_layers) - 1:
-                    is_last = True
-                self._save_queue.put_nowait(
-                    HiddenStatesData(hidden_states=layer, layer_num=i, is_last=is_last)
-                )
+        #     for i, layer in enumerate(hidden_layers):
+        #         is_last = False
+        #         if i == len(hidden_layers) - 1:
+        #             is_last = True
+        #         self._save_queue.put_nowait(
+        #             HiddenStatesData(hidden_states=layer, layer_num=i, is_last=is_last)
+        #         )
         
-        # hidden_states = model_executable(**execute_model_kwargs)
+        hidden_states = model_executable(**execute_model_kwargs)
 
         # Compute the logits.
         logits = self.model.compute_logits(hidden_states, sampling_metadata)

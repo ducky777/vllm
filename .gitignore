@@ -185,3 +185,6 @@ hip_compat.h
 
 # Benchmark dataset
 *.json
+
+data
+notebooks

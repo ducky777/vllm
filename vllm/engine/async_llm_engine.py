@@ -25,8 +25,9 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
-from vllm.sequence import MultiModalData, ControlVectorData
+from vllm.sequence import MultiModalData
 from vllm.usage.usage_lib import UsageContext
+from vllm.control_vectors.data import ControlVectorData
 
 logger = init_logger(__name__)
 ENGINE_ITERATION_TIMEOUT_S = int(
@@ -254,6 +255,7 @@ class _AsyncLLMEngine(LLMEngine):
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
         multi_modal_data: Optional[MultiModalData] = None,
+        control_vector_data: Optional[ControlVectorData] = None,
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(
@@ -276,6 +278,7 @@ class _AsyncLLMEngine(LLMEngine):
             arrival_time=arrival_time,
             lora_request=lora_request,
             multi_modal_data=multi_modal_data,
+            control_vectors=control_vector_data
         )
 
     async def check_health_async(self) -> None:
